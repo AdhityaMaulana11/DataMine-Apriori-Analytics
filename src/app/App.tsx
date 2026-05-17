@@ -50,7 +50,10 @@ export default function App() {
       <Sidebar activeSection={activeSection} onSectionChange={setActiveSection} />
 
       <div className="ml-64">
-        <TopNavbar title={getSectionTitle()} />
+        <TopNavbar 
+          title={getSectionTitle()} 
+          onNavigateToReports={() => setActiveSection('reports')}
+        />
 
         <main className="p-8">
           {/* ── DASHBOARD ─────────────────────────────────────────────────── */}
