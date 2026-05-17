@@ -74,8 +74,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   transactions: [],
   fileName: '',
   params: {
-    minSupport: 0.10,
-    minConfidence: 0.50,
+    minSupport: 0.20,
+    minConfidence: 0.70,
     dateFrom: '',
     dateTo: '',
   },
