@@ -42,34 +42,58 @@ function parseWorkbook(file: File): Promise<Transaction[]> {
       try {
         const wb = XLSX.read(e.target?.result as ArrayBuffer, { type: 'array', cellDates: false });
 
-        // Pick the best sheet: score each sheet named 'transaksi' by row count
+        // FIX 1: Prioritaskan sheet 'transaksi 20%' sebagai sumber data utama.
+        // Kode lama milih sheet dengan row terbanyak → kena 'transaksi baru' (1.938 baris).
+        // Sekarang cari sheet prioritas dulu, baru fallback ke logika lama.
+        const PRIORITY_SHEETS = ['transaksi 20%', 'transaksi20%', 'transaksi_20%'];
         const EXCLUDE_KEYWORDS = ['nilai', 'support', 'confidence', 'lift', 'itemset', 'sheet2', 'asosia', 'asosias'];
-        let sheetName = wb.SheetNames[0];
-        let bestScore = -1;
 
-        for (const name of wb.SheetNames) {
-          const lower = name.toLowerCase();
-          const isExcluded = EXCLUDE_KEYWORDS.some(k => lower.includes(k));
-          if (isExcluded) continue;
-          // Count data rows quickly
-          const wsTest = wb.Sheets[name];
-          const ref = wsTest['!ref'];
-          if (!ref) continue;
-          const range = XLSX.utils.decode_range(ref);
-          const rowCount = range.e.r; // last row index (0-based), approx row count
-          if (rowCount > bestScore) { bestScore = rowCount; sheetName = name; }
+        let sheetName = '';
+
+        // Cari sheet prioritas dulu
+        for (const target of PRIORITY_SHEETS) {
+          const found = wb.SheetNames.find(n => n.toLowerCase().trim() === target.toLowerCase());
+          if (found) { sheetName = found; break; }
         }
 
+        // Kalau tidak ada sheet prioritas, fallback ke sheet dengan row terbanyak
+        if (!sheetName) {
+          let bestScore = -1;
+          for (const name of wb.SheetNames) {
+            const lower = name.toLowerCase();
+            if (EXCLUDE_KEYWORDS.some(k => lower.includes(k))) continue;
+            const wsTest = wb.Sheets[name];
+            const ref = wsTest['!ref'];
+            if (!ref) continue;
+            const range = XLSX.utils.decode_range(ref);
+            if (range.e.r > bestScore) { bestScore = range.e.r; sheetName = name; }
+          }
+        }
+
+        if (!sheetName) sheetName = wb.SheetNames[0];
+
         const ws = wb.Sheets[sheetName];
-        // raw:1 to get raw values (numbers for dates, not formatted strings)
-        const rows: unknown[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', raw: true }) as unknown[][];
+        const allRows: unknown[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', raw: true }) as unknown[][];
+
+        // FIX 2: Skip baris kosong di awal untuk handle sheet 'transaksi 20%'
+        // yang punya 2 baris kosong + kolom pertama kosong sebelum header.
+        // Kode lama langsung baca baris 0 sebagai header → kolom tidak terdeteksi.
+        let headerRowIdx = 0;
+        for (let r = 0; r < Math.min(allRows.length, 10); r++) {
+          const row = allRows[r] as unknown[];
+          const nonEmpty = row.filter(c => String(c ?? '').trim() !== '');
+          if (nonEmpty.length >= 2) { headerRowIdx = r; break; }
+        }
+
+        const rows = allRows.slice(headerRowIdx);
 
         if (rows.length < 2) {
           reject(new Error('Sheet tidak memiliki cukup data (minimal 2 baris termasuk header).'));
           return;
         }
 
-        const header = (rows[0] as unknown[]).map(h => String(h ?? '').toLowerCase().trim());
+        const headerRaw = rows[0] as unknown[];
+        const header = headerRaw.map(h => String(h ?? '').toLowerCase().trim());
 
         // Detect column indices
         const idColIdx = header.findIndex(h =>
@@ -91,9 +115,9 @@ function parseWorkbook(file: File): Promise<Transaction[]> {
 
           for (let r = 1; r < rows.length; r++) {
             const row = rows[r] as unknown[];
-            const rawId   = idColIdx >= 0   ? String(row[idColIdx]   ?? '').trim() : `TXN-${r}`;
-            const rawDate = dateColIdx >= 0  ? row[dateColIdx]                       : '';
-            const rawItem = itemColIdx >= 0  ? String(row[itemColIdx] ?? '').trim() : '';
+            const rawId   = idColIdx >= 0  ? String(row[idColIdx]   ?? '').trim() : `TXN-${r}`;
+            const rawDate = dateColIdx >= 0 ? row[dateColIdx]                      : '';
+            const rawItem = itemColIdx >= 0 ? String(row[itemColIdx] ?? '').trim() : '';
 
             if (!rawId || !rawItem) continue;
 
@@ -101,7 +125,7 @@ function parseWorkbook(file: File): Promise<Transaction[]> {
 
             if (!txMap.has(rawId)) txMap.set(rawId, { date, services: new Set() });
 
-            // Handle comma-separated items in one cell (format B variation)
+            // Handle comma-separated items in one cell (format sheet transaksi 20%)
             rawItem.split(/[,;]/).forEach(part => {
               const p = part.trim();
               if (p) txMap.get(rawId)!.services.add(p);
@@ -174,8 +198,8 @@ function parseWorkbook(file: File): Promise<Transaction[]> {
 export function DataImportPanel() {
   const { setTransactions, clearData, isProcessing, runAnalysis, fileName, isDataLoaded, transactions, params } = useAppStore();
   const inputRef = useRef<HTMLInputElement>(null);
-  const [dragOver, setDragOver]   = useState(false);
-  const [error, setError]         = useState('');
+  const [dragOver, setDragOver]         = useState(false);
+  const [error, setError]               = useState('');
   const [localLoading, setLocalLoading] = useState(false);
 
   const processFile = useCallback(async (file: File) => {
@@ -212,7 +236,7 @@ export function DataImportPanel() {
     avg: (transactions.reduce((s, t) => s + t.services.length, 0) / transactions.length).toFixed(1),
     dates: (() => {
       const d = transactions.map(t => t.date).filter(Boolean).sort();
-      return d.length >= 2 ? `${d[0]} s/d ${d[d.length-1]}` : d[0] ?? '—';
+      return d.length >= 2 ? `${d[0]} s/d ${d[d.length - 1]}` : d[0] ?? '—';
     })(),
   } : null;
 
@@ -224,7 +248,10 @@ export function DataImportPanel() {
           <p className="text-sm text-gray-500">Unggah file <strong>.xlsx / .xls / .csv</strong>. Analisis Apriori berjalan otomatis setelah upload.</p>
         </div>
         {isDataLoaded && (
-          <button onClick={clearData} className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition-colors whitespace-nowrap">
+          <button
+            onClick={clearData}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition-colors whitespace-nowrap"
+          >
             <XCircle size={16} /> Hapus Data
           </button>
         )}
@@ -238,7 +265,9 @@ export function DataImportPanel() {
           <p>• <strong>Long (utama):</strong> Tanggal | ID Transaksi | Jenis Layanan — <em>1 baris = 1 layanan, ID sama = 1 transaksi</em></p>
           <p>• <strong>Wide:</strong> Tanggal | ID Transaksi | Layanan1 | Layanan2 | ...</p>
           <p>• <strong>Binary:</strong> Header = nama layanan, nilai sel = 1 / Ya / ✓ jika dibeli</p>
-          <p className="text-blue-600 pt-1">Parameter aktif — Min Support: <strong>{(params.minSupport*100).toFixed(0)}%</strong> · Min Confidence: <strong>{(params.minConfidence*100).toFixed(0)}%</strong></p>
+          <p className="text-blue-600 pt-1">
+            Parameter aktif — Min Support: <strong>{(params.minSupport * 100).toFixed(0)}%</strong> · Min Confidence: <strong>{(params.minConfidence * 100).toFixed(0)}%</strong>
+          </p>
         </div>
       </div>
 
@@ -249,14 +278,20 @@ export function DataImportPanel() {
         onDrop={handleDrop}
         onClick={() => !isBusy && inputRef.current?.click()}
         className={`border-2 border-dashed rounded-xl p-12 text-center transition-all cursor-pointer ${
-          dragOver ? 'border-teal-500 bg-teal-50' : isBusy ? 'border-gray-200 bg-gray-50 cursor-wait' : 'border-gray-300 hover:border-teal-400 hover:bg-teal-50/30'
+          dragOver
+            ? 'border-teal-500 bg-teal-50'
+            : isBusy
+            ? 'border-gray-200 bg-gray-50 cursor-wait'
+            : 'border-gray-300 hover:border-teal-400 hover:bg-teal-50/30'
         }`}
       >
         <input ref={inputRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleChange} />
         {isBusy ? (
           <div className="flex flex-col items-center">
             <Loader2 size={40} className="text-teal-500 animate-spin mb-4" />
-            <p className="text-gray-600 font-medium">{localLoading ? 'Membaca file Excel...' : 'Menjalankan algoritma Apriori...'}</p>
+            <p className="text-gray-600 font-medium">
+              {localLoading ? 'Membaca file Excel...' : 'Menjalankan algoritma Apriori...'}
+            </p>
             <p className="text-sm text-gray-400 mt-1">Mohon tunggu</p>
           </div>
         ) : (
@@ -290,8 +325,8 @@ export function DataImportPanel() {
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
             {[
               { label: 'Total Transaksi', value: stats.total.toLocaleString('id-ID') },
-              { label: 'Layanan Unik', value: stats.unique },
-              { label: 'Rata-rata Item', value: stats.avg },
+              { label: 'Layanan Unik',    value: stats.unique },
+              { label: 'Rata-rata Item',  value: stats.avg },
               { label: 'Rentang Tanggal', value: stats.dates },
             ].map(s => (
               <div key={s.label} className="bg-white rounded-lg p-3 shadow-sm">
