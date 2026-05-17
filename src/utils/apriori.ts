@@ -186,7 +186,7 @@ export function runApriori(
   }
 
   // Sort by lift DESC, then confidence DESC
-  associationRules.sort((a, b) => b.lift - a.lift || b.confidence - a.confidence);
+  associationRules.sort((a, b) => b.confidence - a.confidence || b.lift - a.lift );
 
   // Assign sequential IDs
   associationRules.forEach((r, i) => { r.id = `Rule_${i + 1}`; });
