@@ -6,9 +6,11 @@ import { useAppStore } from '../../store/useAppStore';
 
 type ExportType = 'lift-ratio' | 'promo-strategy';
 
+// html2canvas-safe base: Arial, no gradient, no flex, no letter-spacing
+const F: React.CSSProperties = { fontFamily: 'Arial, Helvetica, sans-serif' };
+
 interface PromoPackage { namaPaket: string; layanan: string; strategi: string; }
 
-// Derives at most one entry per semantic group (face / hair-3 / hair-2 / basic).
 function derivePromoPackages(
   rules: ReturnType<typeof useAppStore.getState>['associationRules']
 ): PromoPackage[] {
@@ -32,148 +34,124 @@ function derivePromoPackages(
 
   if (!rules.length) return FALLBACK;
 
-  // Group rules into semantic buckets
-  const buckets: Record<string, { layananSet: Set<string>; bestConf: number; bestLift: number; ant: string; con: string }> = {
-    face: { layananSet: new Set(), bestConf: 0, bestLift: 0, ant: '', con: '' },
-    hair3: { layananSet: new Set(['Coloring', 'Hair Mask', 'Vitamin Rambut']), bestConf: 0, bestLift: 0, ant: '', con: '' },
-    hair2: { layananSet: new Set(), bestConf: 0, bestLift: 0, ant: '', con: '' },
-    basic: { layananSet: new Set(), bestConf: 0, bestLift: 0, ant: '', con: '' },
-  };
+  const face: PromoPackage[] = [];
+  const hair3: PromoPackage[] = [];
+  const hair2: PromoPackage[] = [];
+  const basic: PromoPackage[] = [];
+  const seenKeys = new Set<string>();
 
   for (const r of rules) {
     const all = [...r.antecedent, ...r.consequent];
+    const key = [...all].sort().join('|');
+    if (seenKeys.has(key)) continue;
+    seenKeys.add(key);
+
     const hasFace = all.some(s => ['Facial', 'Totok Wajah'].includes(s));
     const hairItems = ['Coloring', 'Hair Mask', 'Vitamin Rambut'];
     const hairCount = all.filter(s => hairItems.includes(s)).length;
     const hasBasic = all.some(s => ['Potong Rambut', 'Cuci Blow'].includes(s));
 
-    const update = (bucket: typeof buckets['face']) => {
-      if (r.confidence > bucket.bestConf) {
-        bucket.bestConf = r.confidence;
-        bucket.bestLift = r.lift;
-        bucket.ant = r.antecedent.join(', ');
-        bucket.con = r.consequent.join(', ');
-        all.forEach(s => bucket.layananSet.add(s));
-      }
-    };
+    const conf = Math.round(r.confidence * 100);
+    const ant = r.antecedent.join(', ');
+    const con = r.consequent.join(', ');
+    const layanan = all.join(' + ');
 
-    if (hasFace) update(buckets.face);
-    else if (hairCount >= 3) update(buckets.hair3);
-    else if (hairCount >= 1) update(buckets.hair2);
-    else if (hasBasic) update(buckets.basic);
+    if (hasFace && face.length === 0) {
+      face.push({ namaPaket: 'Paket "BEAUTY FACE"', layanan, strategi: `Bundling wajah eksklusif (Confidence ${conf}%, Lift ${r.lift.toFixed(2)}). Karyawan wajib menawarkan ${con} saat pelanggan memesan ${ant}. Cocok dijadikan paket hemat dengan diskon 10-15%.` });
+    } else if (!hasFace && hairCount >= 3 && hair3.length === 0) {
+      hair3.push({ namaPaket: 'Paket "HAIR GLOW"', layanan, strategi: `Paket perawatan rambut lengkap (Confidence ${conf}%, Lift ${r.lift.toFixed(2)}). Bundling layanan dengan harga spesial. Tawarkan ${con} saat pelanggan memilih ${ant}.` });
+    } else if (!hasFace && hairCount >= 1 && hairCount < 3 && hair2.length === 0) {
+      hair2.push({ namaPaket: 'Paket "HAIR GLOW"', layanan, strategi: `Paket perawatan rambut (Confidence ${conf}%, Lift ${r.lift.toFixed(2)}). Tawarkan ${con} saat pelanggan memilih ${ant}. Buat paket bundling dengan harga spesial.` });
+    } else if (hasBasic && !hasFace && hairCount === 0 && basic.length === 0) {
+      basic.push({ namaPaket: 'Paket "BASIC CARE"', layanan, strategi: `Paket rutin harian (Confidence ${conf}%, Lift ${r.lift.toFixed(2)}). Cross-selling: tawarkanlah ${con} saat pelanggan memilih ${ant}. Jadikan paket combo terjangkau untuk pelanggan reguler.` });
+    }
   }
 
-  const result: PromoPackage[] = [];
-
-  if (buckets.face.bestConf > 0) {
-    const conf = Math.round(buckets.face.bestConf * 100);
-    result.push({
-      namaPaket: 'Paket "BEAUTY FACE"',
-      layanan: [...buckets.face.layananSet].join(' + ') || 'Facial + Totok Wajah',
-      strategi: `Bundling wajah eksklusif (Confidence ${conf}%, Lift ${buckets.face.bestLift.toFixed(2)}). Karyawan wajib menawarkan ${buckets.face.con} saat pelanggan memesan ${buckets.face.ant}. Cocok dijadikan paket hemat dengan diskon 10-15%.`,
-    });
-  }
-
-  if (buckets.hair3.bestConf > 0 || buckets.hair2.bestConf > 0) {
-    const b = buckets.hair3.bestConf >= buckets.hair2.bestConf ? buckets.hair3 : buckets.hair2;
-    const conf = Math.round(b.bestConf * 100);
-    result.push({
-      namaPaket: 'Paket "HAIR GLOW"',
-      layanan: [...b.layananSet].join(' + ') || 'Coloring + Hair Mask + Vitamin Rambut',
-      strategi: `Paket perawatan rambut lengkap (Confidence ${conf}%, Lift ${b.bestLift.toFixed(2)}). Bundling layanan dengan harga spesial untuk mendorong perawatan rambut menyeluruh dalam 1 kunjungan. Tawarkan ${b.con} saat pelanggan memilih ${b.ant}.`,
-    });
-  }
-
-  if (buckets.basic.bestConf > 0) {
-    const conf = Math.round(buckets.basic.bestConf * 100);
-    result.push({
-      namaPaket: 'Paket "BASIC CARE"',
-      layanan: [...buckets.basic.layananSet].join(' + ') || 'Potong Rambut + Cuci Blow',
-      strategi: `Paket rutin harian (Confidence ${conf}%, Lift ${buckets.basic.bestLift.toFixed(2)}). Cross-selling: tawarkanlah ${buckets.basic.con} saat pelanggan memilih ${buckets.basic.ant}. Jadikan paket combo terjangkau untuk pelanggan reguler.`,
-    });
-  }
-
+  const result = [...face, ...(hair3.length ? hair3 : hair2), ...basic];
   return result.length ? result : FALLBACK;
 }
-
-// Shared base font — MUST be Arial to avoid html2canvas character-spacing bug
-const BASE: React.CSSProperties = { fontFamily: 'Arial, Helvetica, sans-serif' };
 
 // ─── PDF Preview — Lift Ratio ──────────────────────────────────────────────────
 function PdfPreviewLiftRatio({ forwardRef }: { forwardRef: React.RefObject<HTMLDivElement | null> }) {
   const { associationRules, transactions, params, fileName } = useAppStore();
   const rules = associationRules.length > 0 ? associationRules : [
-    { id: 'Rule_1',  antecedent: ['Coloring', 'Vitamin Rambut'],   consequent: ['Hair Mask'],              confidence: 1.00, supportB: 0.29, lift: 3.51, keterangan: 'Valid' as const },
-    { id: 'Rule_2',  antecedent: ['Coloring', 'Hair Mask'],         consequent: ['Vitamin Rambut'],         confidence: 1.00, supportB: 0.30, lift: 3.37, keterangan: 'Valid' as const },
-    { id: 'Rule_3',  antecedent: ['Hair Mask', 'Vitamin Rambut'],   consequent: ['Coloring'],               confidence: 1.00, supportB: 0.29, lift: 3.44, keterangan: 'Valid' as const },
-    { id: 'Rule_4',  antecedent: ['Hair Mask'],                     consequent: ['Vitamin Rambut'],         confidence: 0.99, supportB: 0.30, lift: 3.33, keterangan: 'Valid' as const },
-    { id: 'Rule_5',  antecedent: ['Hair Mask'],                     consequent: ['Coloring', 'Vitamin Rambut'], confidence: 0.99, supportB: 0.28, lift: 3.51, keterangan: 'Valid' as const },
-    { id: 'Rule_6',  antecedent: ['Hair Mask'],                     consequent: ['Coloring'],               confidence: 0.99, supportB: 0.29, lift: 3.40, keterangan: 'Valid' as const },
-    { id: 'Rule_7',  antecedent: ['Facial'],                        consequent: ['Totok Wajah'],            confidence: 0.98, supportB: 0.25, lift: 3.96, keterangan: 'Valid' as const },
-    { id: 'Rule_8',  antecedent: ['Coloring'],                      consequent: ['Hair Mask', 'Vitamin Rambut'], confidence: 0.97, supportB: 0.28, lift: 3.44, keterangan: 'Valid' as const },
-    { id: 'Rule_9',  antecedent: ['Coloring'],                      consequent: ['Hair Mask'],              confidence: 0.97, supportB: 0.29, lift: 3.40, keterangan: 'Valid' as const },
-    { id: 'Rule_10', antecedent: ['Coloring'],                      consequent: ['Vitamin Rambut'],         confidence: 0.97, supportB: 0.30, lift: 3.26, keterangan: 'Valid' as const },
-    { id: 'Rule_11', antecedent: ['Cuci Blow'],                     consequent: ['Potong Rambut'],          confidence: 0.97, supportB: 0.39, lift: 2.46, keterangan: 'Valid' as const },
-    { id: 'Rule_12', antecedent: ['Potong Rambut'],                 consequent: ['Cuci Blow'],              confidence: 0.96, supportB: 0.39, lift: 2.46, keterangan: 'Valid' as const },
-    { id: 'Rule_13', antecedent: ['Totok Wajah'],                   consequent: ['Facial'],                 confidence: 0.96, supportB: 0.24, lift: 3.96, keterangan: 'Valid' as const },
-    { id: 'Rule_14', antecedent: ['Vitamin Rambut'],                consequent: ['Hair Mask'],              confidence: 0.95, supportB: 0.29, lift: 3.33, keterangan: 'Valid' as const },
-    { id: 'Rule_15', antecedent: ['Vitamin Rambut'],                consequent: ['Coloring', 'Hair Mask'],  confidence: 0.95, supportB: 0.28, lift: 3.37, keterangan: 'Valid' as const },
-    { id: 'Rule_16', antecedent: ['Vitamin Rambut'],                consequent: ['Coloring'],               confidence: 0.95, supportB: 0.29, lift: 3.26, keterangan: 'Valid' as const },
+    { id: 'Rule_1',  antecedent: ['Coloring', 'Vitamin Rambut'],        consequent: ['Hair Mask'],                   confidence: 1.00, supportB: 0.29, lift: 3.51, keterangan: 'Valid' as const },
+    { id: 'Rule_2',  antecedent: ['Coloring', 'Hair Mask'],              consequent: ['Vitamin Rambut'],              confidence: 1.00, supportB: 0.30, lift: 3.37, keterangan: 'Valid' as const },
+    { id: 'Rule_3',  antecedent: ['Hair Mask', 'Vitamin Rambut'],        consequent: ['Coloring'],                    confidence: 1.00, supportB: 0.29, lift: 3.44, keterangan: 'Valid' as const },
+    { id: 'Rule_4',  antecedent: ['Hair Mask'],                          consequent: ['Vitamin Rambut'],              confidence: 0.99, supportB: 0.30, lift: 3.33, keterangan: 'Valid' as const },
+    { id: 'Rule_5',  antecedent: ['Hair Mask'],                          consequent: ['Coloring', 'Vitamin Rambut'], confidence: 0.99, supportB: 0.28, lift: 3.51, keterangan: 'Valid' as const },
+    { id: 'Rule_6',  antecedent: ['Hair Mask'],                          consequent: ['Coloring'],                    confidence: 0.99, supportB: 0.29, lift: 3.40, keterangan: 'Valid' as const },
+    { id: 'Rule_7',  antecedent: ['Facial'],                             consequent: ['Totok Wajah'],                 confidence: 0.98, supportB: 0.25, lift: 3.96, keterangan: 'Valid' as const },
+    { id: 'Rule_8',  antecedent: ['Coloring'],                           consequent: ['Hair Mask', 'Vitamin Rambut'],confidence: 0.97, supportB: 0.28, lift: 3.44, keterangan: 'Valid' as const },
+    { id: 'Rule_9',  antecedent: ['Coloring'],                           consequent: ['Hair Mask'],                   confidence: 0.97, supportB: 0.29, lift: 3.40, keterangan: 'Valid' as const },
+    { id: 'Rule_10', antecedent: ['Coloring'],                           consequent: ['Vitamin Rambut'],              confidence: 0.97, supportB: 0.30, lift: 3.26, keterangan: 'Valid' as const },
+    { id: 'Rule_11', antecedent: ['Cuci Blow'],                          consequent: ['Potong Rambut'],               confidence: 0.97, supportB: 0.39, lift: 2.46, keterangan: 'Valid' as const },
+    { id: 'Rule_12', antecedent: ['Potong Rambut'],                      consequent: ['Cuci Blow'],                   confidence: 0.96, supportB: 0.39, lift: 2.46, keterangan: 'Valid' as const },
+    { id: 'Rule_13', antecedent: ['Totok Wajah'],                        consequent: ['Facial'],                      confidence: 0.96, supportB: 0.24, lift: 3.96, keterangan: 'Valid' as const },
+    { id: 'Rule_14', antecedent: ['Vitamin Rambut'],                     consequent: ['Hair Mask'],                   confidence: 0.95, supportB: 0.29, lift: 3.33, keterangan: 'Valid' as const },
+    { id: 'Rule_15', antecedent: ['Vitamin Rambut'],                     consequent: ['Coloring', 'Hair Mask'],       confidence: 0.95, supportB: 0.28, lift: 3.37, keterangan: 'Valid' as const },
+    { id: 'Rule_16', antecedent: ['Vitamin Rambut'],                     consequent: ['Coloring'],                    confidence: 0.95, supportB: 0.29, lift: 3.26, keterangan: 'Valid' as const },
   ];
 
   const today = new Date().toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' });
   const totalTx = transactions.length || 1247;
 
-  const tdBase: React.CSSProperties = { border: '1px solid #d1d5db', padding: '7px 10px', ...BASE, fontSize: '11px', wordBreak: 'break-word' };
+  const cell: React.CSSProperties = { ...F, border: '1px solid #d1d5db', padding: '7px 10px', fontSize: '11px', wordBreak: 'break-word', whiteSpace: 'normal' };
 
   return (
-    <div ref={forwardRef} style={{ width: '960px', padding: '40px', backgroundColor: '#ffffff', color: '#111', ...BASE }}>
-      {/* Header band */}
-      <div style={{ background: 'linear-gradient(135deg,#0f766e 0%,#1d4ed8 100%)', borderRadius: '10px', padding: '20px 28px', marginBottom: '28px', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div>
-          <p style={{ ...BASE, fontSize: '11px', opacity: 0.8, marginBottom: '4px' }}>Laporan Hasil Analisis Algoritma Apriori</p>
-          <h1 style={{ ...BASE, fontSize: '20px', fontWeight: 'bold', margin: 0 }}>Analisis Association Rules &amp; Lift Ratio</h1>
-        </div>
-        <div style={{ textAlign: 'right', fontSize: '11px', opacity: 0.85, ...BASE }}>
-          <p style={{ margin: '2px 0' }}>Sumber Data: {fileName || 'transaksi_salon.xlsx'}</p>
-          <p style={{ margin: '2px 0' }}>Total Transaksi: {totalTx.toLocaleString('id-ID')}</p>
-          <p style={{ margin: '2px 0' }}>Min Support: {(params.minSupport * 100).toFixed(0)}% | Min Confidence: {(params.minConfidence * 100).toFixed(0)}%</p>
-          <p style={{ margin: '2px 0' }}>Tanggal Cetak: {today}</p>
-        </div>
+    <div ref={forwardRef} style={{ ...F, width: '960px', padding: '40px', backgroundColor: '#ffffff', color: '#111111' }}>
+      {/* Header — solid color, no flex, no gradient */}
+      <div style={{ backgroundColor: '#0f766e', padding: '20px 24px', marginBottom: '24px', borderRadius: '8px' }}>
+        <p style={{ ...F, fontSize: '11px', color: '#ccfbf1', margin: '0 0 6px 0' }}>Laporan Hasil Analisis Algoritma Apriori</p>
+        <p style={{ ...F, fontSize: '20px', fontWeight: 'bold', color: '#ffffff', margin: '0 0 10px 0' }}>Analisis Association Rules &amp; Lift Ratio</p>
+        <p style={{ ...F, fontSize: '11px', color: '#ccfbf1', margin: 0 }}>
+          Sumber Data: {fileName || 'transaksi_salon.xlsx'} &nbsp;|&nbsp;
+          Total Transaksi: {totalTx.toLocaleString('id-ID')} &nbsp;|&nbsp;
+          Min Support: {(params.minSupport * 100).toFixed(0)}% &nbsp;|&nbsp;
+          Min Confidence: {(params.minConfidence * 100).toFixed(0)}% &nbsp;|&nbsp;
+          Tanggal Cetak: {today}
+        </p>
       </div>
 
-      {/* Table title */}
-      <p style={{ ...BASE, textAlign: 'center', fontSize: '13px', fontWeight: 'bold', marginBottom: '12px', color: '#1e3a5f', letterSpacing: '0.02em' }}>
+      <p style={{ ...F, textAlign: 'center', fontSize: '13px', fontWeight: 'bold', marginBottom: '12px', color: '#1e3a5f' }}>
         Tabel Hasil Pengujian Lift Ratio
       </p>
 
-      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+        <colgroup>
+          <col style={{ width: '10%' }} />
+          <col style={{ width: '20%' }} />
+          <col style={{ width: '20%' }} />
+          <col style={{ width: '11%' }} />
+          <col style={{ width: '11%' }} />
+          <col style={{ width: '11%' }} />
+          <col style={{ width: '11%' }} />
+        </colgroup>
         <thead>
-          <tr style={{ background: 'linear-gradient(90deg,#0f766e,#1d4ed8)', color: '#fff' }}>
+          <tr style={{ backgroundColor: '#0f766e', color: '#ffffff' }}>
             {['Kode Aturan', 'Antecedent (Jika Memilih...)', 'Consequent (...Maka Memilih)', 'Confidence', 'Support B', 'Lift Ratio', 'Keterangan'].map(h => (
-              <th key={h} style={{ ...tdBase, border: '1px solid #0f766e', color: '#fff', fontWeight: 'bold', textAlign: 'center', padding: '9px 10px' }}>{h}</th>
+              <th key={h} style={{ ...cell, border: '1px solid #0d9488', color: '#ffffff', fontWeight: 'bold', textAlign: 'center', backgroundColor: '#0f766e' }}>{h}</th>
             ))}
           </tr>
         </thead>
         <tbody>
           {rules.map((rule, idx) => (
             <tr key={rule.id} style={{ backgroundColor: idx % 2 === 0 ? '#f0fdf4' : '#ffffff' }}>
-              <td style={{ ...tdBase, textAlign: 'center', fontWeight: 'bold', color: '#0f766e' }}>{rule.id}</td>
-              <td style={{ ...tdBase }}>{rule.antecedent.join(', ')}</td>
-              <td style={{ ...tdBase }}>{rule.consequent.join(', ')}</td>
-              <td style={{ ...tdBase, textAlign: 'center' }}>{(rule.confidence * 100).toFixed(0)}%</td>
-              <td style={{ ...tdBase, textAlign: 'center' }}>{(rule.supportB * 100).toFixed(0)}%</td>
-              <td style={{ ...tdBase, textAlign: 'center', fontWeight: 'bold', color: '#1d4ed8' }}>{rule.lift.toFixed(2)}</td>
-              <td style={{ ...tdBase, textAlign: 'center', fontWeight: 'bold', color: rule.keterangan === 'Valid' ? '#15803d' : '#dc2626' }}>{rule.keterangan}</td>
+              <td style={{ ...cell, textAlign: 'center', fontWeight: 'bold', color: '#0f766e' }}>{rule.id}</td>
+              <td style={{ ...cell }}>{rule.antecedent.join(', ')}</td>
+              <td style={{ ...cell }}>{rule.consequent.join(', ')}</td>
+              <td style={{ ...cell, textAlign: 'center' }}>{(rule.confidence * 100).toFixed(0)}%</td>
+              <td style={{ ...cell, textAlign: 'center' }}>{(rule.supportB * 100).toFixed(0)}%</td>
+              <td style={{ ...cell, textAlign: 'center', fontWeight: 'bold', color: '#1d4ed8' }}>{rule.lift.toFixed(2)}</td>
+              <td style={{ ...cell, textAlign: 'center', fontWeight: 'bold', color: rule.keterangan === 'Valid' ? '#15803d' : '#dc2626' }}>{rule.keterangan}</td>
             </tr>
           ))}
         </tbody>
       </table>
 
-      {/* Footer */}
-      <div style={{ marginTop: '20px', borderTop: '2px solid #e2e8f0', paddingTop: '10px', display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: '#94a3b8', ...BASE }}>
-        <span>DataMine Apriori Analytics — Laporan otomatis dihasilkan oleh sistem</span>
-        <span>{today}</span>
+      <div style={{ ...F, marginTop: '20px', borderTop: '1px solid #e2e8f0', paddingTop: '10px', fontSize: '10px', color: '#94a3b8' }}>
+        <span>DataMine Apriori Analytics — Laporan otomatis</span>
+        <span style={{ float: 'right' }}>{today}</span>
       </div>
     </div>
   );
@@ -186,29 +164,27 @@ function PdfPreviewPromoStrategy({ forwardRef }: { forwardRef: React.RefObject<H
   const today = new Date().toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' });
   const totalTx = transactions.length || 1247;
 
-  const tdBase: React.CSSProperties = { ...BASE, fontSize: '12px', padding: '14px 16px', verticalAlign: 'top', wordBreak: 'break-word', lineHeight: '1.6' };
+  const cell: React.CSSProperties = { ...F, padding: '12px 14px', fontSize: '12px', verticalAlign: 'top', wordBreak: 'break-word', whiteSpace: 'normal', lineHeight: '1.6' };
 
   return (
-    <div ref={forwardRef} style={{ width: '960px', padding: '40px', backgroundColor: '#ffffff', color: '#111', ...BASE }}>
-      {/* Header band */}
-      <div style={{ background: 'linear-gradient(135deg,#c2410c 0%,#ea580c 100%)', borderRadius: '10px', padding: '20px 28px', marginBottom: '28px', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div>
-          <p style={{ ...BASE, fontSize: '11px', opacity: 0.85, marginBottom: '4px' }}>Laporan Hasil Analisis Algoritma Apriori</p>
-          <h1 style={{ ...BASE, fontSize: '18px', fontWeight: 'bold', margin: 0 }}>Rekomendasi Strategi Promosi Berbasis Hasil Apriori</h1>
-        </div>
-        <div style={{ textAlign: 'right', fontSize: '11px', opacity: 0.9, ...BASE }}>
-          <p style={{ margin: '2px 0' }}>Sumber Data: {fileName || 'transaksi_salon.xlsx'}</p>
-          <p style={{ margin: '2px 0' }}>Total Transaksi: {totalTx.toLocaleString('id-ID')}</p>
-          <p style={{ margin: '2px 0' }}>Min Support: {(params.minSupport * 100).toFixed(0)}% | Min Confidence: {(params.minConfidence * 100).toFixed(0)}%</p>
-          <p style={{ margin: '2px 0' }}>Tanggal Cetak: {today}</p>
-        </div>
+    <div ref={forwardRef} style={{ ...F, width: '960px', padding: '40px', backgroundColor: '#ffffff', color: '#111111' }}>
+      {/* Header — solid color, no flex, no gradient */}
+      <div style={{ backgroundColor: '#c2410c', padding: '20px 24px', marginBottom: '24px', borderRadius: '8px' }}>
+        <p style={{ ...F, fontSize: '11px', color: '#fed7aa', margin: '0 0 6px 0' }}>Laporan Hasil Analisis Algoritma Apriori</p>
+        <p style={{ ...F, fontSize: '18px', fontWeight: 'bold', color: '#ffffff', margin: '0 0 10px 0' }}>Rekomendasi Strategi Promosi Berbasis Hasil Apriori</p>
+        <p style={{ ...F, fontSize: '11px', color: '#fed7aa', margin: 0 }}>
+          Sumber Data: {fileName || 'transaksi_salon.xlsx'} &nbsp;|&nbsp;
+          Total Transaksi: {totalTx.toLocaleString('id-ID')} &nbsp;|&nbsp;
+          Min Support: {(params.minSupport * 100).toFixed(0)}% &nbsp;|&nbsp;
+          Min Confidence: {(params.minConfidence * 100).toFixed(0)}% &nbsp;|&nbsp;
+          Tanggal Cetak: {today}
+        </p>
       </div>
 
-      {/* Orange section title bar */}
-      <div style={{ backgroundColor: '#c2410c', borderRadius: '6px 6px 0 0', padding: '11px 18px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-        <span style={{ fontSize: '14px' }}>💡</span>
-        <span style={{ ...BASE, color: '#ffffff', fontWeight: 'bold', fontSize: '12px', letterSpacing: '0.06em' }}>
-          REKOMENDASI STRATEGI PROMOSI BERBASIS HASIL APRIORI
+      {/* Section title bar */}
+      <div style={{ backgroundColor: '#c2410c', padding: '11px 18px', borderRadius: '6px 6px 0 0' }}>
+        <span style={{ ...F, color: '#ffffff', fontWeight: 'bold', fontSize: '12px' }}>
+          💡 REKOMENDASI STRATEGI PROMOSI BERBASIS HASIL APRIORI
         </span>
       </div>
 
@@ -221,7 +197,7 @@ function PdfPreviewPromoStrategy({ forwardRef }: { forwardRef: React.RefObject<H
         <thead>
           <tr style={{ backgroundColor: '#ea580c' }}>
             {['NAMA PAKET', 'LAYANAN YANG DIGABUNGKAN', 'STRATEGI PROMOSI'].map(h => (
-              <th key={h} style={{ ...tdBase, border: '1px solid #c2410c', color: '#ffffff', fontWeight: 'bold', textAlign: 'center', fontSize: '11px', padding: '10px 14px', letterSpacing: '0.04em' }}>
+              <th key={h} style={{ ...cell, border: '1px solid #c2410c', color: '#ffffff', fontWeight: 'bold', textAlign: 'center', fontSize: '11px', padding: '10px 14px', backgroundColor: '#ea580c' }}>
                 {h}
               </th>
             ))}
@@ -230,18 +206,17 @@ function PdfPreviewPromoStrategy({ forwardRef }: { forwardRef: React.RefObject<H
         <tbody>
           {packages.map((pkg, idx) => (
             <tr key={idx} style={{ backgroundColor: idx % 2 === 0 ? '#fff7ed' : '#ffffff' }}>
-              <td style={{ ...tdBase, border: '1px solid #fed7aa', fontWeight: 'bold', textAlign: 'center', color: '#9a3412' }}>{pkg.namaPaket}</td>
-              <td style={{ ...tdBase, border: '1px solid #fed7aa', textAlign: 'center', color: '#374151' }}>{pkg.layanan}</td>
-              <td style={{ ...tdBase, border: '1px solid #fed7aa', color: '#1f2937' }}>{pkg.strategi}</td>
+              <td style={{ ...cell, border: '1px solid #fed7aa', fontWeight: 'bold', textAlign: 'center', color: '#9a3412' }}>{pkg.namaPaket}</td>
+              <td style={{ ...cell, border: '1px solid #fed7aa', textAlign: 'center', color: '#374151' }}>{pkg.layanan}</td>
+              <td style={{ ...cell, border: '1px solid #fed7aa', color: '#1f2937' }}>{pkg.strategi}</td>
             </tr>
           ))}
         </tbody>
       </table>
 
-      {/* Footer */}
-      <div style={{ marginTop: '20px', borderTop: '2px solid #fed7aa', paddingTop: '10px', display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: '#94a3b8', ...BASE }}>
-        <span>DataMine Apriori Analytics — Laporan otomatis dihasilkan oleh sistem</span>
-        <span>{today}</span>
+      <div style={{ ...F, marginTop: '20px', borderTop: '1px solid #fed7aa', paddingTop: '10px', fontSize: '10px', color: '#94a3b8' }}>
+        <span>DataMine Apriori Analytics — Laporan otomatis</span>
+        <span style={{ float: 'right' }}>{today}</span>
       </div>
     </div>
   );
@@ -285,7 +260,17 @@ export function ExportReport() {
     if (!ref.current) return;
     setIsGenerating(true);
     try {
-      const canvas = await html2canvas(ref.current, { scale: 2, useCORS: true, backgroundColor: '#ffffff', logging: false });
+      const canvas = await html2canvas(ref.current, {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: '#ffffff',
+        logging: false,
+        // Ensure correct font rendering
+        onclone: (doc) => {
+          const el = doc.querySelector('[data-pdf-root]') as HTMLElement;
+          if (el) el.style.fontFamily = 'Arial, Helvetica, sans-serif';
+        },
+      });
       const imgData = canvas.toDataURL('image/png');
       const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
       const pdfW = pdf.internal.pageSize.getWidth();
@@ -336,21 +321,20 @@ export function ExportReport() {
           </div>
           <h3 className="text-2xl text-gray-800 mb-3">Ekspor Laporan Analisis</h3>
           <p className="text-gray-600 mb-8" dangerouslySetInnerHTML={{ __html: active.description }} />
-
           <button
             onClick={handleExportPDF}
             disabled={isGenerating}
             className="flex items-center gap-3 mx-auto px-8 py-4 bg-gradient-to-r from-teal-500 to-blue-600 text-white rounded-xl hover:from-teal-600 hover:to-blue-700 transition-all shadow-lg text-base disabled:opacity-60 disabled:cursor-not-allowed"
           >
-            {isGenerating ? <><Loader2 size={22} className="animate-spin" /> Membuat PDF...</> : <><Download size={22} /> Unduh PDF — {active.label}</>}
+            {isGenerating
+              ? <><Loader2 size={22} className="animate-spin" /> Membuat PDF...</>
+              : <><Download size={22} /> Unduh PDF — {active.label}</>}
           </button>
-
           {!isDataLoaded && (
             <p className="mt-4 text-sm text-amber-600">
               ⚠ PDF akan menggunakan data contoh. Import Excel terlebih dahulu untuk data nyata.
             </p>
           )}
-
           <div className="mt-6 flex items-center justify-center gap-6 text-xs text-gray-500 flex-wrap">
             {active.chips.map(chip => <span key={chip}>✓ {chip}</span>)}
           </div>
