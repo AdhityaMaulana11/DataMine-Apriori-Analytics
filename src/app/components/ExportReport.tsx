@@ -227,7 +227,6 @@ function PdfPreviewPromoStrategy({
         padding: '10px 16px',
         fontSize: '13px',
         fontWeight: 'bold',
-        letterSpacing: '0.04em',
         marginBottom: '0',
       }}>
         💡 REKOMENDASI STRATEGI PROMOSI BERBASIS HASIL APRIORI
@@ -246,7 +245,6 @@ function PdfPreviewPromoStrategy({
                   textAlign: 'center',
                   fontWeight: 'bold',
                   fontSize: '11px',
-                  letterSpacing: '0.03em',
                 }}
               >
                 {h}
