@@ -117,7 +117,7 @@ function PdfPreviewLiftRatio({
       style={{
         width: '900px',
         padding: '48px 40px',
-        fontFamily: 'Times New Roman, serif',
+        fontFamily: 'Arial, sans-serif',
         backgroundColor: '#ffffff',
         color: '#111111',
       }}
@@ -201,7 +201,7 @@ function PdfPreviewPromoStrategy({
       style={{
         width: '900px',
         padding: '48px 40px',
-        fontFamily: 'Times New Roman, serif',
+        fontFamily: 'Arial, sans-serif',
         backgroundColor: '#ffffff',
         color: '#111111',
       }}
