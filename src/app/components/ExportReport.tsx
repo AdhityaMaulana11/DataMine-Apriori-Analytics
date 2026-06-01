@@ -229,7 +229,7 @@ function PdfPreviewPromoStrategy({
         fontWeight: 'bold',
         marginBottom: '0',
       }}>
-        💡 REKOMENDASI STRATEGI PROMOSI BERBASIS HASIL APRIORI
+        REKOMENDASI STRATEGI PROMOSI BERBASIS HASIL APRIORI
       </div>
 
       {/* Table */}
@@ -261,7 +261,7 @@ function PdfPreviewPromoStrategy({
               <td style={{ border: '1px solid #fed7aa', padding: '10px 12px', textAlign: 'center', fontSize: '11px', verticalAlign: 'top', width: '22%' }}>
                 {pkg.layanan}
               </td>
-              <td style={{ border: '1px solid #fed7aa', padding: '10px 12px', textAlign: 'left', fontSize: '11px', verticalAlign: 'top', lineHeight: '1.5' }}>
+              <td style={{ border: '1px solid #fed7aa', padding: '10px 12px', textAlign: 'left', fontSize: '11px', verticalAlign: 'top', lineHeight: '16px' }}>
                 {pkg.strategi}
               </td>
             </tr>
