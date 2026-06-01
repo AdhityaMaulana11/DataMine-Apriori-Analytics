@@ -439,10 +439,10 @@ export function ExportReport() {
         </div>
       </div>
 
-      {/* Hidden full-size renders for PDF capture (both always mounted) */}
+      {/* Hidden full-size render for PDF capture (only mount active to prevent overlap bugs) */}
       <div style={{ position: 'absolute', left: '-9999px', top: '0', pointerEvents: 'none' }}>
-        <PdfPreviewLiftRatio forwardRef={liftRatioRef} />
-        <PdfPreviewPromoStrategy forwardRef={promoStrategyRef} />
+        {activeExport === 'lift-ratio' && <PdfPreviewLiftRatio forwardRef={liftRatioRef} />}
+        {activeExport === 'promo-strategy' && <PdfPreviewPromoStrategy forwardRef={promoStrategyRef} />}
       </div>
     </div>
   );
